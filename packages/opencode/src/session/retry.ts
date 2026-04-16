@@ -60,12 +60,26 @@ export namespace SessionRetry {
       // 5xx errors are transient server failures and should always be retried,
       // even when the provider SDK doesn't explicitly mark them as retryable.
       if (!error.data.isRetryable && !(status !== undefined && status >= 500)) {
-        // Before giving up, check message text for rate-limit patterns.
-        // Some providers (e.g. proxies/gateways) return rate-limit errors
+        // Before giving up, check for retryable patterns in the error message.
+        // Some providers (e.g. proxies/gateways) embed errors in the SSE stream
         // with non-standard formats that the SDK doesn't mark as retryable.
-        const lower = error.data.message.toLowerCase()
+        const msg = error.data.message
+        const lower = msg.toLowerCase()
+        // Text-based rate-limit detection
         if (lower.includes("rate limit") || lower.includes("too many requests") || lower.includes("token_limit_exceeded")) {
-          return error.data.message
+          return msg
+        }
+        // Extract embedded JSON status code from validation errors like:
+        // Type validation failed: Value: {"type":"BAD_GATEWAY","code":502,...}
+        const embeddedJson = msg.match(/Value:\s*(\{.*?\})/)
+        if (embeddedJson) {
+          try {
+            const parsed = JSON.parse(embeddedJson[1])
+            const embeddedCode = typeof parsed.code === "number" ? parsed.code : undefined
+            if (embeddedCode !== undefined && (embeddedCode === 429 || embeddedCode >= 500)) {
+              return parsed.message || msg
+            }
+          } catch {}
         }
         return undefined
       }
