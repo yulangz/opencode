@@ -59,7 +59,16 @@ export namespace SessionRetry {
       const status = error.data.statusCode
       // 5xx errors are transient server failures and should always be retried,
       // even when the provider SDK doesn't explicitly mark them as retryable.
-      if (!error.data.isRetryable && !(status !== undefined && status >= 500)) return undefined
+      if (!error.data.isRetryable && !(status !== undefined && status >= 500)) {
+        // Before giving up, check message text for rate-limit patterns.
+        // Some providers (e.g. proxies/gateways) return rate-limit errors
+        // with non-standard formats that the SDK doesn't mark as retryable.
+        const lower = error.data.message.toLowerCase()
+        if (lower.includes("rate limit") || lower.includes("too many requests") || lower.includes("token_limit_exceeded")) {
+          return error.data.message
+        }
+        return undefined
+      }
       if (error.data.responseBody?.includes("FreeUsageLimitError")) return GO_UPSELL_MESSAGE
       return error.data.message.includes("Overloaded") ? "Provider is overloaded" : error.data.message
     }
